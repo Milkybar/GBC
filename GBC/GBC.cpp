@@ -83,7 +83,8 @@ enum class TokenID
 	NIndex,
 	Dot,
 	Comma,
-	End
+	End,
+	Star
 };
 
 class LexStage
@@ -138,8 +139,9 @@ extern const LexStage sNIndex;
 extern const LexStage sDot;
 extern const LexStage sComma;
 extern const LexStage sEnd;
+extern const LexStage sStar;
 
-const LexStage sRoot = { "", TokenID::Root, { sWhitespace, sAlpha, sNumerical, sPlus, sMinus, sAnd, sOr, sXor, sNot, sAssign, sLess, sGreater, sPBrace, sNBrace, sPScope, sNScope, sPIndex, sNIndex, sDot, sComma, sEnd } };
+const LexStage sRoot = { "", TokenID::Root, { sWhitespace, sAlpha, sNumerical, sPlus, sMinus, sAnd, sOr, sXor, sNot, sAssign, sLess, sGreater, sPBrace, sNBrace, sPScope, sNScope, sPIndex, sNIndex, sDot, sComma, sEnd, sStar } };
 const LexStage sWhitespace = { " \t\r\n", TokenID::Whitespace, { sWhitespace } };
 const LexStage sAlpha = { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", TokenID::Label, { sAlphaNum, sAlpha } };
 const LexStage sAlphaNum = { "0123456789", TokenID::Label, { sAlphaNum, sAlpha } };
@@ -175,6 +177,7 @@ const LexStage sNIndex = { "]", TokenID::NIndex, {} };
 const LexStage sDot = { ".", TokenID::Dot, {} };
 const LexStage sComma = { ",", TokenID::Comma, {} };
 const LexStage sEnd = { ";", TokenID::End, {} };
+const LexStage sStar = { "*", TokenID::Star, {} };
 
 struct SourceChar
 {
@@ -359,6 +362,119 @@ Enumerable<SourceToken> EnumerateToken(Enumerable<SourceChar> stream)
 	co_yield{ TokenID::Eos, {}, 0, 0 };
 }
 
+
+
+class SyntaxBase
+{
+protected:
+	void Require(Enumerable<SourceToken>::iterator itr, const TokenID token, const char* error) const
+	{
+		if ((*itr).token != token) throw std::exception(error);
+		++itr;
+	}
+
+	bool Check(Enumerable<SourceToken>::iterator itr, const TokenID token) const
+	{
+		if ((*itr).token == token)
+		{
+			++itr;
+			return true;
+		}
+		return false;
+	}
+};
+
+class SyntaxType : public SyntaxBase
+{
+public:
+	SourceToken type;
+	int indirection;
+
+public:
+	SyntaxType(Enumerable<SourceToken>::iterator itr)
+		: type{ *itr }
+		, indirection{ 0 }
+	{
+		if (type.token != TokenID::Label) throw; // todo : better error message
+		++itr;
+
+		while ((*itr).token == TokenID::Star)
+		{
+			++indirection;
+			++itr;
+		}
+	}
+};
+
+class SyntaxName : public SyntaxBase
+{
+public:
+	SourceToken name;
+
+public:
+	SyntaxName(Enumerable<SourceToken>::iterator itr)
+		: name{ *itr }
+	{
+		if (name.token != TokenID::Label) throw;
+		++itr;
+	}
+};
+
+class SyntaxArg : public SyntaxBase
+{
+public:
+	SyntaxType type;
+	SyntaxName name;
+
+public:
+	SyntaxArg(Enumerable<SourceToken>::iterator itr)
+		: type{ itr }
+		, name{ itr }
+	{ }
+};
+
+class SyntaxFunc : public SyntaxBase
+{
+public:
+	SyntaxType type;
+	SyntaxName name;
+	std::vector<SyntaxArg> args;
+
+public:
+	SyntaxFunc(Enumerable<SourceToken>::iterator itr)
+		: type{ itr }
+		, name{ itr }
+	{
+		Require(itr, TokenID::PBrace, "Expected '("); // todo : better error message
+
+		if (Check(itr, TokenID::NBrace)) goto end_brace;
+		read_args:
+			args.push_back({ itr });
+			if (Check(itr, TokenID::Comma)) goto read_args;
+			Require(itr, TokenID::NBrace, "Expected ')'"); // todo : better error message
+
+		end_brace:
+			Require(itr, TokenID::PScope, "Expected '{'"); // todo : better error message
+	}
+};
+
+//class SyntaxMeta
+//{
+//public:
+//	SyntaxMeta(Enumerable<SourceToken>::iterator itr)
+//	{
+//
+//	}
+//};
+
+SyntaxFunc ParseSyntax(Enumerable<SourceToken> stream)
+{
+	return { stream.begin() };
+}
+
+
+
+
 template <typename E>
 auto EnumChain(E e)
 {
@@ -380,8 +496,21 @@ int main()
 	std::string source(size, '\0');
 	if (!file.read(&source[0], size)) return 1;
 
-	for (const auto& i : EnumChain(EnumerateToken, EnumerateRemBlock, EnumerateRemLine, EnumerateSource(source)))
+	//for (const auto& i : EnumChain(EnumerateToken, EnumerateRemBlock, EnumerateRemLine, EnumerateSource(source)))
+	//{
+	//	std::cout << (int)i.token << ": '" << i.value << "'" << std::endl;
+	//}
+
+	auto f = EnumChain(ParseSyntax, EnumerateToken, EnumerateRemBlock, EnumerateRemLine, EnumerateSource(source));
+	std::cout << "name: " << f.name.name.value << std::endl;
+	std::cout << "return: " << f.type.type.value << std::endl;
+	std::cout << "ptr: " << f.type.indirection << std::endl;
+
+	for (const auto& arg : f.args)
 	{
-		std::cout << (int)i.token << ": '" << i.value << "'" << std::endl;
+		std::cout << "-" << std::endl;
+		std::cout << "arg name: " << arg.name.name.value << std::endl;
+		std::cout << "arg return: " << arg.type.type.value << std::endl;
+		std::cout << "arg ptr: " << arg.type.indirection << std::endl;
 	}
 }
