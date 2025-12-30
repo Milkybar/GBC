@@ -1,0 +1,11 @@
+// this is an example of some code that will be written
+// ---
+[Bank(2), Pos(0xF2)]
+void Name(int arg0, int arg1, char arg2)
+{
+	int v = arg0 + arg1;
+	if (v == 16)
+	{
+		// todo : do something when the condition is met
+	}
+}
