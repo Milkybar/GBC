@@ -1,4 +1,8 @@
-int** foo(int a, int* b)
-{
+function int** foo(int a, int* b)
+{ };
 
-}
+[bank, addr][rom]
+struct str
+{ };
+
+var int** name;

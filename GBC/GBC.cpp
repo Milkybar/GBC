@@ -50,6 +50,9 @@ enum class TokenID
 {
 	Root,
 	Eos,
+	RwFunction,
+	RwVar,
+	RwStruct,
 	Whitespace,
 	Label,
 	Number,
@@ -362,6 +365,31 @@ Enumerable<SourceToken> EnumerateToken(Enumerable<SourceChar> stream)
 	co_yield{ TokenID::Eos, {}, 0, 0 };
 }
 
+Enumerable<SourceToken> EnumerateReserved(Enumerable<SourceToken> stream)
+{
+	for (const auto& i : stream)
+	{
+		if (i.token == TokenID::Label)
+		{
+			if (i.value == "function")
+			{
+				co_yield{ TokenID::RwFunction, i.value, i.column, i.line };
+				continue;
+			}
+			if (i.value == "var")
+			{
+				co_yield{ TokenID::RwVar, i.value, i.column, i.line };
+				continue;
+			}
+			if (i.value == "struct")
+			{
+				co_yield{ TokenID::RwStruct, i.value, i.column, i.line };
+				continue;
+			}
+		}
+		co_yield i;
+	}
+}
 
 
 class SyntaxBase
@@ -448,28 +476,98 @@ public:
 		Require(itr, TokenID::PBrace, "Expected '("); // todo : better error message
 
 		if (Check(itr, TokenID::NBrace)) goto end_brace;
-		read_args:
-			args.push_back({ itr });
-			if (Check(itr, TokenID::Comma)) goto read_args;
-			Require(itr, TokenID::NBrace, "Expected ')'"); // todo : better error message
+	read_args:
+		args.push_back({ itr });
+		if (Check(itr, TokenID::Comma)) goto read_args;
+		Require(itr, TokenID::NBrace, "Expected ')'"); // todo : better error message
 
-		end_brace:
-			Require(itr, TokenID::PScope, "Expected '{'"); // todo : better error message
+	end_brace:
+		Require(itr, TokenID::PScope, "Expected '{'"); // todo : better error message
+		Require(itr, TokenID::NScope, "Expected '}'"); // todo : better error message
+		Require(itr, TokenID::End, "");
 	}
 };
 
-//class SyntaxMeta
-//{
-//public:
-//	SyntaxMeta(Enumerable<SourceToken>::iterator itr)
-//	{
-//
-//	}
-//};
-
-SyntaxFunc ParseSyntax(Enumerable<SourceToken> stream)
+class SyntaxVar : public SyntaxBase
 {
-	return { stream.begin() };
+public:
+	SyntaxType type;
+	SyntaxName name;
+
+public:
+	SyntaxVar(Enumerable<SourceToken>::iterator itr)
+		: type{ itr }
+		, name{ itr }
+	{
+		Require(itr, TokenID::End, "");
+	}
+};
+
+class SyntaxStruct : public SyntaxBase
+{
+public:
+	SyntaxName name;
+	std::vector<SyntaxArg> members;
+
+public:
+	SyntaxStruct(Enumerable<SourceToken>::iterator itr)
+		: name{ itr }
+	{
+		Require(itr, TokenID::PScope, "Expected '{'"); // todo : better error message
+		Require(itr, TokenID::NScope, "Expected '}'"); // todo : better error message
+		Require(itr, TokenID::End, "");
+	}
+};
+
+class SyntaxMetas : public SyntaxBase
+{
+public:
+	std::vector<SyntaxName> names{};
+
+public:
+	void Append(Enumerable<SourceToken>::iterator itr)
+	{
+		if (Check(itr, TokenID::NIndex)) goto end_brace;
+	read_member:
+		names.push_back({ itr });
+		if (Check(itr, TokenID::Comma)) goto read_member;
+
+	end_brace:
+		Require(itr, TokenID::NIndex, "Expected ']'"); // todo : better error message
+	}
+
+	void Clear()
+	{
+		names.clear();
+	}
+};
+
+void ParseSyntax(Enumerable<SourceToken> stream)
+{
+	SyntaxMetas metas;
+	std::vector<SyntaxFunc> functions{};
+	std::vector<SyntaxVar> vars{};
+	std::vector<SyntaxStruct> structs{};
+
+	const auto end = stream.end();
+	for (auto itr = stream.begin(); itr != end;)
+	{
+		const auto& i = *itr;
+		++itr;
+		switch (i.token)
+		{
+		case TokenID::PIndex: metas.Append(itr); continue;
+		case TokenID::RwFunction: functions.push_back({ itr }); continue;
+		case TokenID::RwVar: vars.push_back({ itr }); continue;
+		case TokenID::RwStruct: structs.push_back({ itr }); continue;
+		case TokenID::Eos: break;
+		default: throw; // todo : unhandled token, better error message
+		}
+	}
+
+	std::cout << "functions: " << functions.size() << std::endl;
+	std::cout << "vars:      " << vars.size() << std::endl;
+	std::cout << "structs:   " << structs.size() << std::endl;
 }
 
 
@@ -501,16 +599,17 @@ int main()
 	//	std::cout << (int)i.token << ": '" << i.value << "'" << std::endl;
 	//}
 
-	auto f = EnumChain(ParseSyntax, EnumerateToken, EnumerateRemBlock, EnumerateRemLine, EnumerateSource(source));
-	std::cout << "name: " << f.name.name.value << std::endl;
-	std::cout << "return: " << f.type.type.value << std::endl;
-	std::cout << "ptr: " << f.type.indirection << std::endl;
-
-	for (const auto& arg : f.args)
-	{
-		std::cout << "-" << std::endl;
-		std::cout << "arg name: " << arg.name.name.value << std::endl;
-		std::cout << "arg return: " << arg.type.type.value << std::endl;
-		std::cout << "arg ptr: " << arg.type.indirection << std::endl;
-	}
+	EnumChain(ParseSyntax, EnumerateReserved, EnumerateToken, EnumerateRemBlock, EnumerateRemLine, EnumerateSource(source));
+	
+	//std::cout << "name: " << f.name.name.value << std::endl;
+	//std::cout << "return: " << f.type.type.value << std::endl;
+	//std::cout << "ptr: " << f.type.indirection << std::endl;
+	//
+	//for (const auto& arg : f.args)
+	//{
+	//	std::cout << "-" << std::endl;
+	//	std::cout << "arg name: " << arg.name.name.value << std::endl;
+	//	std::cout << "arg return: " << arg.type.type.value << std::endl;
+	//	std::cout << "arg ptr: " << arg.type.indirection << std::endl;
+	//}
 }
